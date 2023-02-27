@@ -86,7 +86,10 @@ class Level {
 }
 
 function loadResourcesThenRun() {
-    loadImage('font.png').then((fontImage) => { main(fontImage); });
+    var fontImage = new Image();
+    fontImage.src = 'font.png';
+    fontImage.onload = () => main(fontImage);
+    // loadImage('font.png').then((fontImage) => { main(fontImage); });
 }
 
 function main(fontImage) {
@@ -101,9 +104,11 @@ function main(fontImage) {
 
     const renderer = createRenderer(gl, fontImage);
     const state = initState(renderer.createFieldRenderer, renderer.createLightingRenderer, renderer.createColoredTrianglesRenderer);
+    state.gamepadMgr = new GamepadManager();
 
     canvas.requestPointerLock = canvas.requestPointerLock || canvas.mozRequestPointerLock;
     document.exitPointerLock = document.exitPointerLock || document.mozExitPointerLock;
+
 
     canvas.onmousedown = () => {
         if (state.paused) {
@@ -158,7 +163,7 @@ function main(fontImage) {
         const mouseCaptured =
             document.pointerLockElement === canvas ||
             document.mozPointerLockElement === canvas;
-        if (mouseCaptured) {
+        if (mouseCaptured) { //|| state.gamepadMgr.gamepads.keys().length>0
             document.addEventListener("mousemove", onMouseMoved, false);
             document.addEventListener("mousedown", onMouseDown, false);
             if (state.paused) {
@@ -175,7 +180,7 @@ function main(fontImage) {
     }
 
     function onMouseMoved(e) {
-        updatePosition(state, e);
+        updatePosition(state, e.movementX, e.movementY);
     }
 
     function onMouseDown(e) {
@@ -209,12 +214,12 @@ const loadImage = src =>
         img.src = src;
     });
 
-function updatePosition(state, e) {
+function updatePosition(state, dx, dy) {
     if (state.player.hitPoints <= 0) {
         return;
     }
 
-    const movement = vec2.fromValues(e.movementX, -e.movementY);
+    const movement = vec2.fromValues(dx, -dy);
     const scale = 0.05 * Math.pow(1.1, state.mouseSensitivity);
     vec2.scaleAndAdd(state.player.velocity, state.player.velocity, movement, scale);
 }
@@ -231,6 +236,11 @@ function tryDrinkInvulnerabilityPotion(state) {
 
     state.player.numInvulnerabilityPotions -= 1;
     state.player.invulnerabilityTimer = Math.max(state.player.invulnerabilityTimer, invulnerabilityDuration);
+
+    if(lastController!=null) {
+        lastController.vibrate(0.1, 0.1, state.player.invulnerabilityTimer*1000);
+    }
+
 }
 
 function tryShootBullet(state) {
@@ -246,6 +256,10 @@ function tryShootBullet(state) {
     const playerSpeed = vec2.length(state.player.velocity);
     const scale = Math.max(2 * playerSpeed, bulletMinSpeed) / Math.max(playerSpeed, 0.001);
     vec2.scale(vel, state.player.velocity, scale);
+
+    if(lastController!=null) {
+        lastController.vibrate(1, 1, 100);
+    }
 
     state.playerBullets.push({
         position: pos,
@@ -1551,6 +1565,7 @@ function createGlyphIndexBuffer(gl, maxQuads) {
 }
 
 function createGlyphTextureFromImage(gl, image) {
+
     const numGlyphsX = 16;
     const numGlyphsY = 16;
     const numGlyphs = numGlyphsX * numGlyphsY;
@@ -1597,6 +1612,23 @@ function updateAndRender(now, renderer, state) {
 
     if (dt > 0) {
         updateState(state, dt);
+    }
+
+    if (state.paused && controlStates['fire'] && !oldControlStates['fire']) {
+        canvas.requestPointerLock();
+    }
+
+    let oldControlStates = {...controlStates};
+    state.gamepadMgr.update_gamepad_states();
+
+    if (controlStates.x!=oldControlStates.x || controlStates.y!=oldControlStates.y) {
+        updatePosition(state, controlStates.x*0.05*canvas.height, controlStates.y*0.05*canvas.height);
+    }
+    if(controlStates['fire'] && !oldControlStates['fire']) {
+        tryShootBullet(state);
+    }
+    if(controlStates['use'] && !oldControlStates['use']) {
+        tryDrinkInvulnerabilityPotion(state);        
     }
 
     renderScene(renderer, state);
@@ -2011,6 +2043,9 @@ function damagePlayer(state, numHitPoints) {
 
     if (hitPointsPrev > 0) {
         state.player.damageDisplayTimer = damageDisplayDuration;
+        if(lastController!=null) {
+            lastController.vibrate(0.5, 0.5, 250);
+        }
     }
 
     state.player.invulnerabilityTimer = 0;
